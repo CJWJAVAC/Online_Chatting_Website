@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <title>Websocket ChatRoom</title>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="/webjars/bootstrap/4.3.1/dist/css/bootstrap.min.css">
+    <style>
+        [v-cloak] {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<div class="container" id="app" v-cloak>
+    <div class="row">
+        <div class="col-md-6">
+            <h4>{{roomName}} <span class="badge badge-info badge-pill">{{userCount}}</span></h4>
+        </div>
+        <div class="col-md-6 text-right">
+            <a class="btn btn-primary btn-sm" href="/logout">로그아웃</a>
+            <a class="btn btn-info btn-sm" href="/chat/room">채팅방 나가기</a>
+        </div>
+    </div>
+    <div class="input-group">
+        <div class="input-group-prepend">
+            <label class="input-group-text">내용</label>
+        </div>
+        <input type="text" class="form-control" v-model="message" v-on:keypress.enter="sendMessage('TALK')">
+        <div class="input-group-append">
+            <button class="btn btn-primary" type="button" @click="sendMessage('TALK')">보내기</button>
+        </div>
+    </div>
+    <ul class="list-group">
+        <li class="list-group-item" v-for="message in messages">
+            {{message.sender}} - {{message.message}}</a>
+        </li>
+    </ul>
+</div>
+<!-- JavaScript -->
+<script src="/webjars/vue/2.5.16/dist/vue.min.js"></script>
+<script src="/webjars/axios/0.17.1/dist/axios.min.js"></script>
+<script src="/webjars/sockjs-client/1.1.2/sockjs.min.js"></script>
+<script src="/webjars/stomp-websocket/2.3.3-1/stomp.min.js"></script>
+<script>
+    // websocket & stomp initialize
+    var sock = new SockJS("/ws-stomp");
+    var ws = Stomp.over(sock);
+
+    // vue.js
+    var vm = new Vue({
+        el: '#app',
+        data: {
+            roomId: '',
+            roomName: '',
+            message: '',
+            messages: [],
+            token: '',
+            userCount: 0
+        },
+        created() {
+            // 로컬 스토리지에서 방 정보 가져오기
+            this.roomId = localStorage.getItem('wschat.roomId');
+            // this.roomName = localStorage.getItem('wschat.roomName');
+
+            axios.get('/chat/room/' + this.roomId)
+                .then(response => {
+                    this.roomName = response.data.name; // 방 이름 초기화
+                })
+                .catch(error => {
+                    console.error("방 정보를 가져오는 중 오류 발생:", error);
+                });
+
+            var _this = this;
+
+            // JWT 토큰 요청 후 웹소켓 연결
+            axios.get('/chat/user')
+                .then(response => {
+                    _this.token = response.data.token;
+
+                    ws.connect(
+                        { "token": _this.token }, // CONNECT 헤더에 토큰 전달
+                        function(frame) {
+                            // 채팅방 구독 (헤더에 토큰 포함)
+                            ws.subscribe(
+                                "/sub/chat/room/" + _this.roomId,
+                                function(message) {
+                                    var recv = JSON.parse(message.body);
+                                    _this.recvMessage(recv);
+                                },
+                                { "token": _this.token } // ✅ subscribe 헤더에도 토큰 전달
+                            );
+
+
+                        },
+                        function(error) {
+                            alert("서버 연결에 실패 하였습니다. 다시 접속해 주십시요.");
+                            location.href = "/chat/room";
+                        }
+                    );
+                })
+                .catch(err => {
+                    console.error("토큰 발급 실패:", err);
+                    alert("채팅방 접속에 필요한 인증에 실패했습니다.");
+                });
+        },
+        methods: {
+            sendMessage: function(type) {
+                if (!this.message && type === 'TALK') return;
+
+                ws.send(
+                    "/pub/chat/message",
+                    { "token": this.token }, // SEND 헤더에 토큰 전달
+                    JSON.stringify({
+                        type: type,
+                        roomId: this.roomId,
+                        message: this.message
+                    })
+                );
+
+                if (type === 'TALK') this.message = '';
+            },
+            recvMessage: function(recv) {
+                this.messages.unshift({
+                    "type": recv.type,
+                    "sender": recv.sender,
+                    "message": recv.message
+                });
+                this.userCount = recv.userCount;
+            }
+        }
+    });
+</script>
+
+</body>
+</html>

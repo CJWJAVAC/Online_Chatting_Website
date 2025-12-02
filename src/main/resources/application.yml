@@ -1,0 +1,13 @@
+spring:
+  devtools:
+    livereload:
+      enabled: true
+    restart:
+      enabled: false
+  freemarker:
+    cache: false
+  profiles:
+    active: local
+  jwt:
+    secret: mySuperLongSecretKeyForJwtTokenExample123456789012345678901234567890
+
